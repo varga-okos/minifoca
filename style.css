@@ -1,0 +1,30 @@
+body {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    /* Sötét háttér a játék körül */
+    background: radial-gradient(circle at center, #1a2a3a 0%, #000000 100%);
+    overflow: hidden;
+    font-family: 'Oswald', sans-serif;
+}
+
+.game-container {
+    position: relative;
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+}
+
+#gameCanvas {
+    display: block;
+    border: 1px solid #333;
+    background-color: #0e0e0e;
+    /* Neon zöld keret */
+    box-shadow: 0 0 20px rgba(49, 237, 49, 0.1); 
+}
+
+#fullscreenButton {
+    display: none;
+}
