@@ -17,7 +17,7 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas(); 
 
 // --- MP3 HANGOK BETÖLTÉSE ---
-const audioKick = new Audio('kick.mp3');
+const audioKick = new Audio('kick.wav');
 const audioWhistle = new Audio('whistle.mp3');
 // Előre betöltjük, hogy ne akadjon
 audioKick.preload = 'auto';
@@ -184,3 +184,4 @@ let leagueTable = [
     { name: "Kecskeméti TE", played: 0, points: 0, win: 0, draw: 0, loss: 0, difficulty: 0.7, isPlayer: false },
     { name: "MTK Budapest", played: 0, points: 0, win: 0, draw: 0, loss: 0, difficulty: 1.0, isPlayer: false }
 ];
+
