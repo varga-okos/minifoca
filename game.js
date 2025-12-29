@@ -48,6 +48,46 @@ const GOAL_PAUSE_TIME = 60;
 const INTRO_TEXT_TIME = 150;
 const TIME_INTERVAL = 1000; 
 
+// --- EFFEKT RENDSZER (RÉSZECSKÉK) ---
+let particles = [];
+
+function createParticle(x, y, type, color) {
+    let p = { x: x, y: y, type: type, life: 1.0, color: color };
+    if (type === 'grass') {
+        p.vx = (Math.random() - 0.5) * 4; p.vy = (Math.random() - 0.5) * 4;
+        p.size = Math.random() * 5 + 2; p.decay = 0.05;
+    } else if (type === 'trail') {
+        p.vx = 0; p.vy = 0; p.size = ball.radius * 0.8; p.decay = 0.1;
+    } else if (type === 'confetti') {
+        p.vx = (Math.random() - 0.5) * 10; p.vy = (Math.random() - 2) * 8;
+        p.size = Math.random() * 8 + 4; p.decay = 0.005; p.gravity = 0.2;
+    }
+    particles.push(p);
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.life -= p.decay;
+        p.x += p.vx; p.y += p.vy;
+        if (p.type === 'confetti') p.vy += p.gravity; // Gravitáció a konfettinek
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    particles.forEach(p => {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        if (p.type === 'trail') {
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.size * SCALE, 0, Math.PI*2); ctx.fill();
+        } else {
+            ctx.fillRect(p.x, p.y, p.size * SCALE, p.size * SCALE);
+        }
+    });
+    ctx.globalAlpha = 1.0;
+}
+
 // --- REPLAY RENDSZER ---
 const REPLAY_DURATION = 180;
 let replayBuffer = [];
@@ -120,14 +160,12 @@ let lastKick1 = false, lastKick2 = false;
 let lastSlide1 = false, lastSlide2 = false;
 
 window.addEventListener('keydown', function(e) {
-    // Ha névbeírás van, speciálisan kezeljük a billentyűket
     if (gameState === 'name_input') {
         if (e.key === 'Backspace') { e.preventDefault(); handleNameInput('Backspace'); } 
         else if (e.key === 'Enter') { handleNameInput('Enter'); } 
         else if (e.key.length === 1) { handleNameInput(e.key); }
         return; 
     }
-    // Normál játék esetén tiltjuk a görgetést a nyilakkal
     if(["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
     keys[e.key] = true; keys[e.code] = true;
 });
@@ -183,12 +221,9 @@ function setOpponentDifficulty() {
     player2.kickPower = KICK_POWER * (0.8 + (OPPONENT_DIFFICULTY * 0.2));
 }
 
-// --- JAVÍTOTT SZIMULÁCIÓ ---
+// --- SZIMULÁCIÓ ---
 function simulateOtherMatches() {
-    // Mindenki más játszik, aki nem a játékos és nem az ellenfél
     let otherTeams = leagueTable.filter(t => !t.isPlayer && t.name !== opponentName);
-
-    // Véletlenszerű párosítás
     otherTeams.sort(() => Math.random() - 0.5);
 
     while (otherTeams.length >= 2) {
@@ -213,7 +248,6 @@ function simulateOtherMatches() {
         else { teamA.points++; teamB.points++; teamA.draw++; teamB.draw++; }
     }
     
-    // Tabella rendezése
     leagueTable.sort((a, b) => (b.points - a.points) || (b.diff - a.diff) || (b.goalsFor - a.goalsFor));
 }
 
@@ -233,7 +267,6 @@ function finishCareerMatch() {
     
     currentMatchDay++;
     if (currentMatchDay <= MAX_MATCH_DAYS) {
-        // Következő ellenfél választása véletlenszerűen
         const otherTeams = leagueTable.filter(t => !t.isPlayer);
         const nextOpponent = otherTeams[Math.floor(Math.random() * otherTeams.length)];
         if(nextOpponent) opponentName = nextOpponent.name;
@@ -255,6 +288,7 @@ function resetBall() {
     player1.sprintTime = player1.maxSprintTime; player2.sprintTime = player2.maxSprintTime;
     player1.slideTimer = 0; player2.slideTimer = 0;
     kickerPlayer = null; replayBuffer = [];
+    particles = []; // Töröljük a részecskéket
     if (currentMode === 'career' && gameState === 'main_menu') {
         leagueTable.forEach(team => { team.played = 0; team.points = 0; team.win = 0; team.draw = 0; team.loss = 0; team.goalsFor = 0; team.goalsAgainst = 0; team.diff = 0; });
         playerUpgradePoints = 0; playerStats = { baseSpeed: 1.0, maxSprintTime: 1.0, kickPower: 1.0 };
@@ -309,7 +343,7 @@ function checkFoul(slidingPlayer, targetPlayer) {
 }
 
 function setupFoulKick(foulVictim, isPenalty) {
-    const topBar = 60 * SCALE; // FIX MÉRET
+    const topBar = 60 * SCALE;
     const pitchCenterY = topBar + (HEIGHT - topBar) / 2;
 
     const isVictimBlue = foulVictim.team === 'blue';
@@ -369,32 +403,59 @@ function applyKickLogic(player, isKickAttempt) {
     }
 }
 
+// --- JAVÍTOTT BECSÚSZÁS LOGIKA ---
 function applySlideLogic(player, isSlideAttempt, moveX, moveY) {
+    // Ha már csúszik
     if (player.slideTimer > 0) {
         player.slideTimer--;
-        if (player.slideTimer > SLIDE_RECOVERY) { player.vx *= SLIDE_FRICTION; player.vy *= SLIDE_FRICTION; }
-        else { player.vx = 0; player.vy = 0; player.speed = player.baseSpeed; player.sprintTime = Math.min(player.maxSprintTime, player.sprintTime + SPRINT_RECHARGE_RATE); }
-        return true; 
+        
+        // FŰ EFFEKT GENERÁLÁSA (Ha van részecske rendszer)
+        if (player.slideTimer > SLIDE_RECOVERY && frameCounter % 3 === 0 && typeof createParticle !== 'undefined') {
+            createParticle(player.x, player.y + 15*SCALE, 'grass', '#2E8B57');
+        }
+
+        if (player.slideTimer > SLIDE_RECOVERY) { 
+            player.vx *= SLIDE_FRICTION; 
+            player.vy *= SLIDE_FRICTION; 
+        } else { 
+            // Csúszás vége (felkelés)
+            player.vx = 0; 
+            player.vy = 0; 
+            player.speed = player.baseSpeed; 
+            player.sprintTime = Math.min(player.maxSprintTime, player.sprintTime + SPRINT_RECHARGE_RATE); 
+        }
+        return true; // Jelezzük, hogy csúszás van, ne kezelje a sima mozgást
     }
+
+    // Csúszás indítása (Csak ha mozog!)
     if (isSlideAttempt && (Math.abs(moveX) > 0 || Math.abs(moveY) > 0)) {
         player.slideTimer = SLIDE_TIME + SLIDE_RECOVERY;
-        player.moveDirX = moveX; player.moveDirY = moveY;
+        player.moveDirX = moveX; 
+        player.moveDirY = moveY;
+        
         const d = Math.sqrt(moveX**2 + moveY**2);
-        if(d>0){ player.vx = (moveX/d)*player.baseSpeed*SLIDE_BOOST*SCALE; player.vy = (moveY/d)*player.baseSpeed*SLIDE_BOOST*SCALE; }
+        if(d > 0) { 
+            player.vx = (moveX/d) * player.baseSpeed * SLIDE_BOOST * SCALE; 
+            player.vy = (moveY/d) * player.baseSpeed * SLIDE_BOOST * SCALE; 
+        }
+        
         player.sprintTime = Math.max(0, player.sprintTime - player.maxSprintTime / 4);
+        
+        // KEZDŐ FŰCSOMÓK
+        if (typeof createParticle !== 'undefined') {
+            for(let i=0; i<5; i++) createParticle(player.x, player.y + 15*SCALE, 'grass', '#32CD32');
+        }
+        
         return true;
     }
     return false;
 }
 
-// --- JAVÍTOTT AI ---
+// --- AI ---
 function getBotMove() {
-    const topBar = 60 * SCALE; // FIX MÉRET
+    const topBar = 60 * SCALE; 
     const bot = player2; const isBotRed = bot.team === 'red';
-    
-    // Pálya középpont Y
     const pitchCenterY = topBar + (HEIGHT - topBar) / 2;
-    
     const goalX = isBotRed ? 0 : WIDTH; const goalY = pitchCenterY;
     const botGoalX = isBotRed ? WIDTH : 0; 
     const buffer = 50 * SCALE; 
@@ -471,7 +532,9 @@ function getBotMove() {
 
 function drawGameObjects(state, p1, p2, b) {
     const r = ball.radius * SCALE;
+    // Árnyék
     ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(b.x, b.y + 5*SCALE, r, r * 0.6, 0, 0, Math.PI*2); ctx.fill();
+    // Labda
     ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.fillStyle = b.color; ctx.fill();
     drawPlayer(p1, state === 'playing' && p1.team === 'blue');
     drawPlayer(p2, state === 'playing' && !isBotActive && p2.team === 'red');
@@ -499,7 +562,7 @@ function drawStaminaBar(p) {
     ctx.fillRect(p.x - barW/2, p.y + 25*SCALE, barW * ratio, barH);
 }
 
-// --- BIZTOSAN JÓ HELYRE RAJZOLÓ PÁLYA ---
+// --- JAVÍTOTT PÁLYA RAJZOLÁS ---
 function drawPitch() {
     const topBar = 60 * SCALE; // FIX 60px magas sáv
     const fieldHeight = HEIGHT - topBar; 
@@ -513,7 +576,7 @@ function drawPitch() {
     
     ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 3*SCALE; ctx.lineJoin = 'round';
     
-    // Külső vonal: A sáv ALATT kezdődik 40px-el. (Tehát 100px-nél)
+    // Külső vonal (A sáv ALATT kezdődik + Margó)
     ctx.strokeRect(50*SCALE, topBar + 40*SCALE, WIDTH-100*SCALE, fieldHeight-80*SCALE);
     
     // Felező
@@ -582,21 +645,12 @@ function drawMenuOption(text, index, isSelected, x, startY) {
 }
 // --- MENÜK ÉS JÁTÉKMENET ---
 
-// Segédfüggvény gombok rajzolásához (Súgóhoz)
 function drawKey(key, x, y, w = 50, h = 50) {
     const sW = w * SCALE; const sH = h * SCALE;
     const radius = 8 * SCALE;
-    
-    // Gomb árnyéka (3D hatás)
-    ctx.fillStyle = '#1a1a1a';
-    ctx.beginPath(); ctx.roundRect(x, y + 5*SCALE, sW, sH, radius); ctx.fill();
-
-    // Gomb teteje
-    ctx.fillStyle = '#333';
-    ctx.strokeStyle = '#555'; ctx.lineWidth = 2 * SCALE;
+    ctx.fillStyle = '#1a1a1a'; ctx.beginPath(); ctx.roundRect(x, y + 5*SCALE, sW, sH, radius); ctx.fill();
+    ctx.fillStyle = '#333'; ctx.strokeStyle = '#555'; ctx.lineWidth = 2 * SCALE;
     ctx.beginPath(); ctx.roundRect(x, y, sW, sH, radius); ctx.fill(); ctx.stroke();
-
-    // Felirat
     ctx.fillStyle = 'white'; ctx.font = getFont(20, 'bold'); ctx.textAlign = 'center';
     ctx.fillText(key, x + sW/2, y + sH/2 + 8*SCALE);
 }
@@ -605,67 +659,37 @@ function drawControls() {
     drawPitch(); 
     ctx.fillStyle = 'rgba(16, 24, 32, 0.96)'; ctx.fillRect(0, 0, WIDTH, HEIGHT);
     
-    // Cím
     ctx.textAlign = 'center'; ctx.fillStyle = COLORS.neonGreen; ctx.font = getFont(50);
     ctx.fillText("JÁTÉK ÚTMUTATÓ", WIDTH/2, 70*SCALE);
 
-    const leftColX = WIDTH * 0.25;
-    const rightColX = WIDTH * 0.75;
+    const leftColX = WIDTH * 0.25; const rightColX = WIDTH * 0.75;
     const rowStart = 150 * SCALE;
-    const rowGap = 100 * SCALE;
 
-    // --- BAL OLDAL: IRÁNYÍTÁS ---
+    // BAL OLDAL
     ctx.textAlign = 'center'; ctx.fillStyle = COLORS.accentBlue; ctx.font = getFont(30);
     ctx.fillText("BILLENTYŰZET", leftColX, rowStart - 40*SCALE);
-
-    // WASD Rajzolása
     drawKey("W", leftColX - 25*SCALE, rowStart);
     drawKey("A", leftColX - 80*SCALE, rowStart + 55*SCALE);
     drawKey("S", leftColX - 25*SCALE, rowStart + 55*SCALE);
     drawKey("D", leftColX + 30*SCALE, rowStart + 55*SCALE);
     ctx.fillStyle = '#AAA'; ctx.font = getFont(18); ctx.fillText("MOZGÁS", leftColX - 25*SCALE + 25*SCALE, rowStart + 130*SCALE);
-
-    // Egyéb gombok
     const actY = rowStart + 180 * SCALE;
-    drawKey("SHIFT", leftColX - 120*SCALE, actY, 100); 
-    ctx.textAlign='left'; ctx.fillText("SPRINT (Vigyázz, fáraszt!)", leftColX, actY + 30*SCALE);
-    
-    drawKey("SPACE", leftColX - 120*SCALE, actY + 70*SCALE, 100); 
-    ctx.fillText("RÚGÁS / SZERELÉS", leftColX, actY + 100*SCALE);
+    drawKey("SHIFT", leftColX - 120*SCALE, actY, 100); ctx.textAlign='left'; ctx.fillText("SPRINT (Vigyázz, fáraszt!)", leftColX, actY + 30*SCALE);
+    drawKey("SPACE", leftColX - 120*SCALE, actY + 70*SCALE, 100); ctx.fillText("RÚGÁS / SZERELÉS", leftColX, actY + 100*SCALE);
+    drawKey("CTRL", leftColX - 120*SCALE, actY + 140*SCALE, 100); ctx.fillText("BECSÚSZÁS (Veszélyes!)", leftColX, actY + 170*SCALE);
 
-    drawKey("CTRL", leftColX - 120*SCALE, actY + 140*SCALE, 100); 
-    ctx.fillText("BECSÚSZÁS (Veszélyes!)", leftColX, actY + 170*SCALE);
-
-    // --- JOBB OLDAL: TIPPEK ÉS SZABÁLYOK ---
+    // JOBB OLDAL
     ctx.textAlign = 'center'; ctx.fillStyle = COLORS.neonGreen; ctx.font = getFont(30);
     ctx.fillText("PRO TIPPEK", rightColX, rowStart - 40*SCALE);
-
     ctx.textAlign = 'left'; ctx.fillStyle = 'white'; ctx.font = getFont(22);
     const startTipY = rowStart + 20*SCALE;
-    
-    // Tipp 1: Stamina
     ctx.fillStyle = 'orange'; ctx.fillText("⚡ ÁLLÓKÉPESSÉG:", rightColX - 150*SCALE, startTipY);
-    ctx.fillStyle = '#DDD'; ctx.font = getFont(18);
-    ctx.fillText("A Sprint csökkenti az energiádat.", rightColX - 150*SCALE, startTipY + 30*SCALE);
-    ctx.fillText("Ha elfogy, lassabb leszel!", rightColX - 150*SCALE, startTipY + 55*SCALE);
-
-    // Tipp 2: Becsúszás
+    ctx.fillStyle = '#DDD'; ctx.font = getFont(18); ctx.fillText("A Sprint csökkenti az energiádat.", rightColX - 150*SCALE, startTipY + 30*SCALE);
+    
     const tip2Y = startTipY + 100*SCALE;
-    ctx.fillStyle = COLORS.redCard; ctx.font = getFont(22);
-    ctx.fillText("🟥 SZABÁLYTALANSÁG:", rightColX - 150*SCALE, tip2Y);
-    ctx.fillStyle = '#DDD'; ctx.font = getFont(18);
-    ctx.fillText("Ha nem a labdát találod el,", rightColX - 150*SCALE, tip2Y + 30*SCALE);
-    ctx.fillText("szabadrúgás vagy 11-es jár!", rightColX - 150*SCALE, tip2Y + 55*SCALE);
+    ctx.fillStyle = COLORS.redCard; ctx.font = getFont(22); ctx.fillText("🟥 SZABÁLYTALANSÁG:", rightColX - 150*SCALE, tip2Y);
+    ctx.fillStyle = '#DDD'; ctx.font = getFont(18); ctx.fillText("Ha nem a labdát találod el,", rightColX - 150*SCALE, tip2Y + 30*SCALE); ctx.fillText("szabadrúgás vagy 11-es jár!", rightColX - 150*SCALE, tip2Y + 55*SCALE);
 
-    // Tipp 3: Karrier
-    const tip3Y = tip2Y + 100*SCALE;
-    ctx.fillStyle = COLORS.accentBlue; ctx.font = getFont(22);
-    ctx.fillText("🏆 KARRIER MÓD:", rightColX - 150*SCALE, tip3Y);
-    ctx.fillStyle = '#DDD'; ctx.font = getFont(18);
-    ctx.fillText("Gyűjts pontokat győzelmekkel,", rightColX - 150*SCALE, tip3Y + 30*SCALE);
-    ctx.fillText("és fejleszd a csapatod sebességét!", rightColX - 150*SCALE, tip3Y + 55*SCALE);
-
-    // Visszalépés
     ctx.textAlign = 'center'; ctx.fillStyle = '#AAA'; ctx.font = getFont(20); 
     ctx.fillText("NYOMJ ENTERT A VISSZALÉPÉSHEZ", WIDTH/2, HEIGHT - 50*SCALE);
 }
@@ -724,11 +748,8 @@ function drawCareerMenu() {
 
 function drawMainMenu() {
     drawPitch(); ctx.fillStyle = 'rgba(16, 24, 32, 0.9)'; ctx.fillRect(0,0,WIDTH,HEIGHT);
-    // BNZ STUDIO LOGO A MENÜBEN IS
     ctx.font = getFont(30, 'bold'); ctx.fillStyle = '#AAA'; ctx.textAlign = 'left'; 
     ctx.fillText("BNZ STUDIO PRESENTS", 100*SCALE, 80*SCALE);
-    
-    // MINI FOCA CÍM
     ctx.font = getFont(120, 'italic 900'); ctx.fillStyle = 'white'; ctx.fillText("MINI", 100*SCALE, 180*SCALE);
     ctx.fillStyle = COLORS.neonGreen; ctx.fillText("FOCA", 340*SCALE, 180*SCALE);
     mainMenuItems.forEach((item, i) => drawMenuOption(item.text, i, i===selectedMenuItem, 100*SCALE, 400*SCALE));
@@ -755,22 +776,17 @@ function drawNameInput() {
     drawPitch(); 
     ctx.fillStyle='rgba(16, 24, 32, 0.95)'; ctx.fillRect(0,0,WIDTH,HEIGHT); 
     ctx.textAlign='center';
-    
     ctx.fillStyle='white'; ctx.font=getFont(50); 
     ctx.fillText("ÚJ KARRIER KEZDÉSE", WIDTH/2, HEIGHT/2 - 100*SCALE);
-    
     ctx.fillStyle='#AAA'; ctx.font=getFont(30); 
     ctx.fillText("ÍRD BE A CSAPATOD NEVÉT:", WIDTH/2, HEIGHT/2 - 40*SCALE);
-    
     ctx.fillStyle = 'rgba(255,255,255,0.1)';
     ctx.fillRect(WIDTH/2 - 200*SCALE, HEIGHT/2, 400*SCALE, 60*SCALE);
     ctx.strokeStyle = COLORS.neonGreen; ctx.lineWidth = 3;
     ctx.strokeRect(WIDTH/2 - 200*SCALE, HEIGHT/2, 400*SCALE, 60*SCALE);
-    
     ctx.fillStyle=COLORS.neonGreen; ctx.font=getFont(40); 
     const cursor = (Math.floor(Date.now() / 500) % 2 === 0) ? "|" : "";
     ctx.fillText(currentNameInput + cursor, WIDTH/2, HEIGHT/2 + 45*SCALE); 
-    
     ctx.fillStyle='#AAA'; ctx.font=getFont(20); 
     ctx.fillText("NYOMJ ENTERT A FOLYTATÁSHOZ", WIDTH/2, HEIGHT/2 + 100*SCALE);
 }
@@ -811,8 +827,9 @@ function handleMenuInput(menuItems, moveY, isKick) {
 function update() {
     frameCounter++; updateGamepad();
     
-    if (isReplaying) { playReplay(); return; }
+    updateParticles(); // Effektek
 
+    if (isReplaying) { playReplay(); return; }
     if (gameState === 'name_input') { return; } 
 
     let moveX1 = 0, moveY1 = 0, isSprint1 = false, isKick1 = false, isSlide1 = false;
@@ -861,19 +878,56 @@ function update() {
         }
         if(isBotActive) applyKickLogic(player2, isKick2);
 
-        players.forEach(p => { p.x = Math.max(50*SCALE + p.radius, Math.min(WIDTH - 50*SCALE - p.radius, p.x)); p.y = Math.max(40*SCALE + p.radius, Math.min(HEIGHT - 40*SCALE - p.radius, p.y)); });
+        // --- JAVÍTOTT, RAGADÁSMENTES HATÁROK ---
+        const TOP_BAR_H = 60 * SCALE; // Felső sáv fix magassága
+        const MARGIN = 40 * SCALE;    // Margó a vonaltól
+        
+        // Pálya határainak pontos kiszámítása (ahol a vonalak vannak)
+        // Bal: 50 | Jobb: WIDTH - 50
+        // Fent: 60 (sáv) + 40 (margó) = 100
+        // Lent: HEIGHT - 40
+        const MIN_X = 50 * SCALE + player1.radius * SCALE;
+        const MAX_X = WIDTH - 50 * SCALE - player1.radius * SCALE;
+        const MIN_Y = TOP_BAR_H + MARGIN + player1.radius * SCALE;
+        const MAX_Y = HEIGHT - MARGIN - player1.radius * SCALE;
+
+        players.forEach(p => { 
+            // Egyszerű "Clamping" (Nem nullázzuk a sebességet, így nem ragad be)
+            if (p.x < MIN_X) p.x = MIN_X;
+            if (p.x > MAX_X) p.x = MAX_X;
+            if (p.y < MIN_Y) p.y = MIN_Y;
+            if (p.y > MAX_Y) p.y = MAX_Y;
+        });
+
         if(gameState === 'playing') {
             players.forEach(checkCollision);
             ball.vx *= ball.friction; ball.vy *= ball.friction; ball.x += ball.vx; ball.y += ball.vy;
-            const isGoalY = ball.y > HEIGHT/2 - (GOAL_HEIGHT*SCALE)/2 && ball.y < HEIGHT/2 + (GOAL_HEIGHT*SCALE)/2;
-            if (isGoalY) {
-                if (ball.x < 50*SCALE) { scoreRed++; isReplaying = true; replayIndex = 0; gameState = 'replay'; } 
-                else if (ball.x > WIDTH - 50*SCALE) { scoreBlue++; isReplaying = true; replayIndex = 0; gameState = 'replay'; }
+            
+            if (Math.abs(ball.vx) > 5 * SCALE || Math.abs(ball.vy) > 5 * SCALE) {
+                 createParticle(ball.x, ball.y, 'trail', 'rgba(255, 255, 255, 0.4)');
             }
+
+            // GÓL DETEKTÁLÁS (Középen a pályán)
+            const PITCH_CENTER_Y = TOP_BAR_H + (HEIGHT - TOP_BAR_H) / 2;
+            const isGoalY = ball.y > PITCH_CENTER_Y - (GOAL_HEIGHT*SCALE)/2 && 
+                           ball.y < PITCH_CENTER_Y + (GOAL_HEIGHT*SCALE)/2;
+
+            if (isGoalY) {
+                if (ball.x < 50*SCALE) { scoreRed++; triggerGoal(); } 
+                else if (ball.x > WIDTH - 50*SCALE) { scoreBlue++; triggerGoal(); }
+            }
+            
+            // FALS ÉS HATÁROK (Labda)
             if (ball.x < 50*SCALE + ball.radius && !isGoalY) { ball.x = 50*SCALE + ball.radius; ball.vx = -ball.vx; }
             else if (ball.x > WIDTH - 50*SCALE - ball.radius && !isGoalY) { ball.x = WIDTH - 50*SCALE - ball.radius; ball.vx = -ball.vx; }
-            if (ball.y < 40*SCALE + ball.radius) { ball.y = 40*SCALE + ball.radius; ball.vy = -ball.vy; }
-            if (ball.y > HEIGHT - 40*SCALE - ball.radius) { ball.y = HEIGHT - 40*SCALE - ball.radius; ball.vy = -ball.vy; }
+            
+            // Labda Y határok (Ugyanott, mint a játékosoknál, de sugár korrekcióval)
+            const BALL_MIN_Y = TOP_BAR_H + MARGIN + ball.radius;
+            const BALL_MAX_Y = HEIGHT - MARGIN - ball.radius;
+            
+            if (ball.y < BALL_MIN_Y) { ball.y = BALL_MIN_Y; ball.vy = -ball.vy; }
+            if (ball.y > BALL_MAX_Y) { ball.y = BALL_MAX_Y; ball.vy = -ball.vy; }
+            
             saveFrame();
         }
     } 
@@ -887,25 +941,24 @@ function update() {
     }
 }
 
+function triggerGoal() {
+    isReplaying = true; replayIndex = 0; gameState = 'replay';
+    for(let i=0; i<50; i++) {
+        const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF'];
+        createParticle(WIDTH/2, HEIGHT/2 - 200*SCALE, 'confetti', colors[Math.floor(Math.random()*colors.length)]);
+    }
+}
+
 function draw() {
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
     
-    // INTRO KÉPERNYŐ
+    // INTRO
     if (gameState === 'intro') { 
-        drawPitch(); 
-        ctx.fillStyle='rgba(16, 24, 32, 0.95)'; ctx.fillRect(0,0,WIDTH,HEIGHT); 
-        
-        ctx.textAlign = 'center'; 
-        ctx.font = getFont(150, 'italic 900'); 
-        ctx.fillStyle = 'white'; 
-        ctx.fillText("MINI", WIDTH/2 - 120*SCALE, HEIGHT/2 - 20*SCALE);
-        ctx.fillStyle = COLORS.neonGreen; 
-        ctx.fillText("FOCA", WIDTH/2 + 180*SCALE, HEIGHT/2 - 20*SCALE);
-
-        ctx.font = getFont(40, 'bold'); 
-        ctx.fillStyle = '#AAAAAA';
-        ctx.fillText("BNZ STUDIO", WIDTH/2, HEIGHT/2 + 50*SCALE);
-        
+        drawPitch(); ctx.fillStyle='rgba(16, 24, 32, 0.95)'; ctx.fillRect(0,0,WIDTH,HEIGHT); 
+        ctx.textAlign = 'center'; ctx.font = getFont(150, 'italic 900'); 
+        ctx.fillStyle = 'white'; ctx.fillText("MINI", WIDTH/2 - 120*SCALE, HEIGHT/2 - 20*SCALE);
+        ctx.fillStyle = COLORS.neonGreen; ctx.fillText("FOCA", WIDTH/2 + 180*SCALE, HEIGHT/2 - 20*SCALE);
+        ctx.font = getFont(40, 'bold'); ctx.fillStyle = '#AAAAAA'; ctx.fillText("BNZ STUDIO", WIDTH/2, HEIGHT/2 + 50*SCALE);
         return; 
     }
 
@@ -924,7 +977,9 @@ function draw() {
         return;
     }
 
-    drawPitch(); drawGameObjects(gameState, player1, player2, ball);
+    drawPitch(); 
+    drawParticles(); // Effektek
+    drawGameObjects(gameState, player1, player2, ball);
 
     if (isReplaying) {
         ctx.fillStyle = 'rgba(255, 0, 0, 0.2)'; ctx.fillRect(0, 0, WIDTH, HEIGHT);
